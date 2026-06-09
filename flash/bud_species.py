@@ -15,7 +15,9 @@ SPECIES_SCALE = 4          # 5-line poses ~12 chars wide; scale 4 fits the 320px
 ANIM_FPS = 12              # base tick rate; per-state `div` slows specific states
 
 # Registry / display order. Lazy: only the active one is ever held in RAM.
-_NAMES = ("cat", "dragon", "owl", "robot")
+_NAMES = ("cat", "axolotl", "blob", "cactus", "capybara", "chonk", "dragon", "duck",
+          "ghost", "goose", "mushroom", "octopus", "owl", "penguin", "rabbit", "robot",
+          "snail", "turtle")
 
 _cur_idx = -1
 _cur = None
