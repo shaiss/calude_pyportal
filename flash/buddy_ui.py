@@ -14,6 +14,8 @@ from adafruit_display_shapes.rect import Rect
 import adafruit_touchscreen
 import bud_proto
 import bud_screens
+import bud_stats
+import microcontroller
 
 # ---------- ESP32 (native BLE firmware) in run mode ----------
 gpio0 = digitalio.DigitalInOut(board.ESP_GPIO0)
@@ -247,6 +249,10 @@ display.root_group = root
 # ---------- state ----------
 boot = time.monotonic()
 tama = bud_proto.TamaState()
+stats = bud_stats.Stats.load(microcontroller.nvm)
+print("[stats] loaded: lvl=%d tok=%d appr=%d deny=%d (nvm=%dB, need=%dB)"
+      % (stats.level, stats.tokens, stats.approvals, stats.denials,
+         len(microcontroller.nvm), bud_stats.NVM_SIZE))
 last_data = 0.0
 buf = b""
 last_state = ""
@@ -337,6 +343,11 @@ while True:
             # heartbeat -> drive the UI from tama (parse_line already updated it)
             if decoded.startswith('{"total"'):
                 last_data = time.monotonic()
+                stats.on_bridge_tokens(tama.tokens)
+                if stats.poll_levelup():
+                    stats.save(microcontroller.nvm)
+                    react("celebrate", AMBER, 2.5)
+                    print("[stats] LEVEL UP -> %d" % stats.level)
                 if tama.waiting > 0:
                     set_state("attention")
                 elif tama.running > 0:
@@ -400,6 +411,8 @@ while True:
                         appr_face.text = FACES["celebrate"]
                         appr_face.color = GREEN
                         last_touch_act = nowt
+                        stats.on_approval(int(nowt - prompt_t0))
+                        stats.save(microcontroller.nvm)
                         play("success_chime")
                         react("celebrate", GREEN, 0.8, then=("heart", PINK, 0.9))
                         print("[touch] APPROVE id=%s" % prompt_id)
@@ -410,6 +423,8 @@ while True:
                         appr_face.text = FACES["dizzy"]
                         appr_face.color = AMBER
                         last_touch_act = nowt
+                        stats.on_denial()
+                        stats.save(microcontroller.nvm)
                         play("error_buzz")
                         react("dizzy", AMBER, 1.5)
                         print("[touch] DENY id=%s" % prompt_id)
