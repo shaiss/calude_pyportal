@@ -1,84 +1,60 @@
-# pyportal-claude-buddy : multi-species ASCII pet data + frame selector.
-# Pure data + pure functions (host-testable). Each species defines, per persona state, a
-# tuple of 5-line pose strings + a beat `seq` (indices into the poses) + a `div` (lower =
-# faster). frame(idx, state, t) picks the pose for time t. Ported from the reference
-# src/buddies/*.cpp (the P[]/SEQ[] pose machine), rendered as a single label at SPECIES_SCALE.
+# pyportal-claude-buddy : multi-species pet loader (LAZY -- one species resident at a time).
 #
-# Add a species: append a dict to SPECIES with the 7 states (sleep/idle/busy/attention/
-# celebrate/dizzy/heart); missing states fall back to "idle".
+# 18 species of pose data will not fit in the SAMD51's RAM at once (loading them all was a
+# MemoryError), so each species lives in its own `bud_species_<name>.py` (a single DATA dict
+# of per-state {frames, seq, div}) and is imported ON DEMAND. Switching species frees the
+# previously-resident module first, so memory stays flat no matter how many species exist.
+#
+# Add a species: write flash/bud_species_<name>.py with a DATA dict (same shape as the
+# others -- 7 states, each {"div": N, "seq": (...), "frames": (5-line strings...)}) and add
+# its name to _NAMES below. deploy.ps1 copies every bud_*.py automatically.
+import gc
+import sys
 
-SPECIES_SCALE = 4          # 5-line poses are ~12 chars wide; scale 4 fits the 320px screen
+SPECIES_SCALE = 4          # 5-line poses ~12 chars wide; scale 4 fits the 320px screen
 ANIM_FPS = 12              # base tick rate; per-state `div` slows specific states
 
+# Registry / display order. Lazy: only the active one is ever held in RAM.
+_NAMES = ("cat", "dragon", "owl", "robot")
 
-def _f(*lines):
-    return "\n".join(lines)
-
-
-# ── cat ── faithful subset of src/buddies/cat.cpp pose sequences ──────────────────
-_CAT = {
-    "name": "cat",
-    "color": 0xC2A6,
-    "sleep": {"div": 6, "seq": (0, 1, 0, 1, 2, 2, 0, 1),
-              "frames": (
-                  _f("            ", "            ", "   .-..-.   ", "  ( -.- )   ", "  `------`~ "),
-                  _f("            ", "            ", "   .-..-.   ", "  ( -.- )_  ", " `~------'~ "),
-                  _f("            ", "            ", "   .-/\\.    ", "  (  ..  )) ", "  `~~~~~~`  "))},
-    "idle": {"div": 6, "seq": (0, 0, 0, 1, 0, 0, 2, 0, 3, 0, 0, 4),
-             "frames": (
-                 _f("            ", "   /\\_/\\    ", "  ( o   o ) ", "  (  w   )  ", '  (")_(")   '),
-                 _f("            ", "   /\\_/\\    ", "  (o    o ) ", "  (  w   )  ", '  (")_(")   '),
-                 _f("            ", "   /\\_/\\    ", "  ( o    o) ", "  (  w   )  ", '  (")_(")   '),
-                 _f("            ", "   /\\_/\\    ", "  ( -   - ) ", "  (  w   )  ", '  (")_(")   '),
-                 _f("            ", "   /\\_/\\    ", "  ( ^   ^ ) ", "  (  P   )  ", '  (")_(")   '))},
-    "busy": {"div": 4, "seq": (0, 0, 1, 2, 1, 2, 0, 3),
-             "frames": (
-                 _f("            ", "   /\\_/\\    ", "  ( O   O ) ", "  (  w   )  ", '  (")_(")   '),
-                 _f("      .     ", "   /\\_/\\    ", "  ( o   o ) ", "  (  w   )/ ", '  (")_(")   '),
-                 _f("    .       ", "   /\\_/\\    ", "  ( o   o ) ", "  (  w   )_ ", '  (")_(")   '),
-                 _f("            ", "   /\\_/\\    ", "  ( -   - ) ", "  (  w   )  ", '  (")_(")   '))},
-    "attention": {"div": 3, "seq": (0, 1, 0, 2, 0, 3),
-                  "frames": (
-                      _f("            ", "   /^_^\\    ", "  ( O   O ) ", "  (  v   )  ", '  (")_(")   '),
-                      _f("            ", "   /^_^\\    ", "  (O    O ) ", "  (  v   )  ", '  (")_(")   '),
-                      _f("            ", "   /^_^\\    ", "  ( O    O) ", "  (  v   )  ", '  (")_(")   '),
-                      _f("            ", "   /^_^\\    ", "  ( O   O ) ", "  (  >   )  ", '  (")_(")   '))},
-    "celebrate": {"div": 3, "seq": (0, 1, 2, 1, 0),
-                  "frames": (
-                      _f("            ", "   /\\_/\\    ", "  ( ^   ^ ) ", "  (  W   )  ", ' /(")_(")\\  '),
-                      _f("  \\^   ^/   ", "    /\\_/\\   ", "  ( ^   ^ ) ", "  (  W   )  ", '  (")_(")   '),
-                      _f("  \\^   ^/   ", "    /\\_/\\   ", "  ( * * * ) ", "  (  W   )  ", '  (")_(")~  '))},
-    "dizzy": {"div": 4, "seq": (0, 1, 0, 1, 2, 2),
-              "frames": (
-                  _f("            ", "  /\\_/\\     ", " ( @   @ )  ", " (   ~~  )  ", ' (")_(")    '),
-                  _f("            ", "    /\\_/\\   ", "  ( @   @ ) ", "  (  ~~  )  ", '    (")_(") '),
-                  _f("            ", "   /\\_/\\    ", "  ( x   @ ) ", "  (  v   )  ", '  (")_(")~  '))},
-    "heart": {"div": 5, "seq": (0, 0, 1, 0, 2, 0),
-              "frames": (
-                  _f("            ", "   /\\_/\\    ", "  ( ^   ^ ) ", "  (  u   )  ", '  (")_(")~  '),
-                  _f("            ", "   /\\_/\\    ", "  ( <3<3 ) ", "  (  u   )  ", '  (")_(")~  '),
-                  _f("            ", "   /\\_/\\    ", "  (#^   ^#) ", "  (  u   )  ", '  (")_(")   '))},
-}
-
-SPECIES = [_CAT]
+_cur_idx = -1
+_cur = None
 
 
 def count():
-    return len(SPECIES)
+    return len(_NAMES)
 
 
 def name(idx):
-    return SPECIES[idx % len(SPECIES)]["name"]
+    return _NAMES[idx % len(_NAMES)]
+
+
+def _load(idx):
+    """Return the active species' DATA dict, importing it on demand and freeing the previous."""
+    global _cur_idx, _cur
+    idx %= len(_NAMES)
+    if idx == _cur_idx and _cur is not None:
+        return _cur
+    if _cur_idx >= 0:                      # free the previously-resident species
+        prev = "bud_species_" + _NAMES[_cur_idx]
+        _cur = None
+        if prev in sys.modules:
+            del sys.modules[prev]
+        gc.collect()
+    mod = __import__("bud_species_" + _NAMES[idx])
+    _cur = mod.DATA
+    _cur_idx = idx
+    return _cur
 
 
 def color(idx):
-    return SPECIES[idx % len(SPECIES)]["color"]
+    return _load(idx)["color"]
 
 
 def frame(idx, state, t):
-    """Return the pose string for species `idx`, persona `state`, at time `t` seconds."""
-    sp = SPECIES[idx % len(SPECIES)]
-    st = sp.get(state) or sp["idle"]
+    """Pose string for species `idx`, persona `state`, at time `t` seconds."""
+    d = _load(idx)
+    st = d.get(state) or d["idle"]
     seq = st["seq"]
     beat = (int(t * ANIM_FPS) // st["div"]) % len(seq)
     return st["frames"][seq[beat]]
