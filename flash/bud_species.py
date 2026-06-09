@@ -60,3 +60,22 @@ def frame(idx, state, t):
     seq = st["seq"]
     beat = (int(t * ANIM_FPS) // st["div"]) % len(seq)
     return st["frames"][seq[beat]]
+
+
+# state-keyed particle overlay (shared across species, like the reference's overlays):
+# drifting Zzz on sleep, floating hearts, confetti on celebrate, swirl on dizzy, etc.
+_PARTICLE = {
+    "sleep": ("z  ", " z ", "  z", "   "),
+    "disc": ("z  ", " z ", "  z", "   "),
+    "heart": ("<3 ", " <3", "<3 ", "   "),
+    "celebrate": ("\\*/", "* *", " * ", ". ."),
+    "dizzy": ("*  ", "  *", " * ", "*  "),
+    "busy": (".  ", ".. ", "...", "   "),
+    "attention": ("!", " ", "!", " "),
+}
+
+
+def particle(state, t):
+    """Tiny state-keyed particle string (empty for idle); cycles ~2 Hz."""
+    seq = _PARTICLE.get(state)
+    return seq[int(t * 2) % len(seq)] if seq else ""

@@ -225,6 +225,8 @@ home_grp.append(dbg)
 pet = label.Label(terminalio.FONT, text=FACES["idle"], color=FG, scale=bud_species.SPECIES_SCALE,
                   x=16, y=110, line_spacing=0.95)
 home_grp.append(pet)
+parts = label.Label(terminalio.FONT, text="", color=DIM, scale=3, x=250, y=98)
+home_grp.append(parts)
 home_grp.append(Rect(8, 300, W - 16, 2, fill=DIV))
 counts = label.Label(terminalio.FONT, text="", color=FG, scale=2, x=10, y=322)
 home_grp.append(counts)
@@ -631,6 +633,8 @@ while True:
             anim_state = react_state
     pet.text = bud_species.frame(species_idx, anim_state, now)
     pet.color = SCOL.get(anim_state, FG)
+    parts.text = bud_species.particle(anim_state, now)
+    parts.color = SCOL.get(anim_state, DIM)
     if pixel is not None:
         if stats.setting(bud_stats.S_LED) and last_state == "attention":
             _ph = (now * 1.5) % 2.0
