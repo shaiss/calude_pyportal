@@ -197,25 +197,68 @@ def react(face_key, color, dur=1.5, then=None):
 root = displayio.Group()
 root.append(Rect(0, 0, W, H, fill=BG))
 
-badge = label.Label(terminalio.FONT, text="starting", color=DIM, scale=2, x=10, y=18)
-root.append(badge)
+# top tab bar: HOME | PET | INFO (tap to switch screens); active tab brightened.
+TAB_W = W // 3
+tab_lbls = []
+for _i, _nm in enumerate(bud_screens.TABS):
+    _lb = label.Label(terminalio.FONT, text=_nm.upper(), color=DIM, scale=2,
+                      x=_i * TAB_W + 16, y=12)
+    tab_lbls.append(_lb)
+    root.append(_lb)
+root.append(Rect(0, bud_screens.TAB_H, W, 1, fill=DIV))
 
-# live touch readout (raw landscape -> portrait); stays blank until the screen is tapped
-dbg = label.Label(terminalio.FONT, text="", color=AMBER, scale=2, x=10, y=44)
-root.append(dbg)
-
+# ---- HOME: pet + status HUD ----
+home_grp = displayio.Group()
+badge = label.Label(terminalio.FONT, text="starting", color=DIM, scale=2, x=10, y=46)
+home_grp.append(badge)
+dbg = label.Label(terminalio.FONT, text="", color=AMBER, scale=2, x=10, y=70)
+home_grp.append(dbg)
 pet = label.Label(terminalio.FONT, text=FACES["idle"], color=FG, scale=6,
-                  x=46, y=70, line_spacing=0.95)
-root.append(pet)
-
-root.append(Rect(8, 286, W - 16, 2, fill=DIV))
-
-counts = label.Label(terminalio.FONT, text="", color=FG, scale=2, x=10, y=312)
-root.append(counts)
-msg = label.Label(terminalio.FONT, text="", color=DIM, scale=2, x=10, y=348, line_spacing=1.1)
-root.append(msg)
+                  x=46, y=108, line_spacing=0.95)
+home_grp.append(pet)
+home_grp.append(Rect(8, 300, W - 16, 2, fill=DIV))
+counts = label.Label(terminalio.FONT, text="", color=FG, scale=2, x=10, y=322)
+home_grp.append(counts)
+msg = label.Label(terminalio.FONT, text="", color=DIM, scale=2, x=10, y=356, line_spacing=1.1)
+home_grp.append(msg)
 toks = label.Label(terminalio.FONT, text="", color=DIM, scale=2, x=10, y=462)
-root.append(toks)
+home_grp.append(toks)
+root.append(home_grp)
+
+# ---- PET: gamification stats (the photo screen); texts set by draw_pet() ----
+pet_grp = displayio.Group()
+_py = bud_screens.TAB_H + 14
+pet_title = label.Label(terminalio.FONT, text="Buddy", color=FG, scale=2, x=10, y=_py)
+pet_mood = label.Label(terminalio.FONT, text="", color=PINK, scale=2, x=10, y=_py + 30)
+pet_fed = label.Label(terminalio.FONT, text="", color=GREEN, scale=2, x=10, y=_py + 56)
+pet_energy = label.Label(terminalio.FONT, text="", color=AMBER, scale=2, x=10, y=_py + 82)
+pet_lv = label.Label(terminalio.FONT, text="", color=FG, scale=3, x=10, y=_py + 118)
+pet_appr = label.Label(terminalio.FONT, text="", color=DIM, scale=2, x=10, y=_py + 152)
+pet_deny = label.Label(terminalio.FONT, text="", color=DIM, scale=2, x=10, y=_py + 176)
+pet_nap = label.Label(terminalio.FONT, text="", color=DIM, scale=2, x=10, y=_py + 200)
+pet_tok = label.Label(terminalio.FONT, text="", color=DIM, scale=2, x=10, y=_py + 224)
+pet_today = label.Label(terminalio.FONT, text="", color=DIM, scale=2, x=10, y=_py + 248)
+for _l in (pet_title, pet_mood, pet_fed, pet_energy, pet_lv,
+           pet_appr, pet_deny, pet_nap, pet_tok, pet_today):
+    pet_grp.append(_l)
+pet_grp.hidden = True
+root.append(pet_grp)
+
+# ---- INFO: what it is + hardware (static for now) ----
+info_grp = displayio.Group()
+_iy = bud_screens.TAB_H + 14
+_info_lines = [
+    ("I watch your Claude", DIM), ("desktop sessions and", DIM),
+    ("surface approvals here.", DIM), ("", DIM),
+    ("tap a prompt's", FG), ("APPROVE / DENY.", FG), ("", DIM),
+    ("PyPortal Titano", DIM), ("SAMD51 + ESP32 BLE", DIM), ("", DIM),
+    ("github.com/shaiss", DIM), ("/calude_pyportal", DIM),
+]
+for _j, (_t, _c) in enumerate(_info_lines):
+    info_grp.append(label.Label(terminalio.FONT, text=_t, color=_c, scale=2,
+                                x=10, y=_iy + _j * 22))
+info_grp.hidden = True
+root.append(info_grp)
 
 # approval overlay: full-screen, so the base pet/HUD is covered -- the cat shrinks to a
 # small chip and the screen is dominated by big APPROVE / DENY buttons (bud_screens geometry).
@@ -253,6 +296,10 @@ stats = bud_stats.Stats.load(microcontroller.nvm)
 print("[stats] loaded: lvl=%d tok=%d appr=%d deny=%d (nvm=%dB, need=%dB)"
       % (stats.level, stats.tokens, stats.approvals, stats.denials,
          len(microcontroller.nvm), bud_stats.NVM_SIZE))
+screen = "home"
+last_pet_draw = 0.0
+energy_at_nap = 3
+last_nap_end = boot
 last_data = 0.0
 buf = b""
 last_state = ""
@@ -318,6 +365,35 @@ def hide_approval():
         last_appr = False
 
 
+def draw_pet():
+    pet_title.text = (stats.owner_name + "'s " + stats.pet_name) if stats.owner_name else stats.pet_name
+    m = stats.mood()
+    pet_mood.text = "mood   " + "* " * m + ". " * (4 - m)
+    fed = stats.fed()
+    pet_fed.text = "fed    " + "#" * fed + "." * (10 - fed)
+    en = bud_stats.energy_tier(energy_at_nap, (time.monotonic() - last_nap_end) / 3600.0)
+    pet_energy.text = "energy " + "|" * en + "_" * (5 - en)
+    pet_lv.text = "Lv %d" % stats.level
+    pet_appr.text = "approved %d" % stats.approvals
+    pet_deny.text = "denied   %d" % stats.denials
+    pet_nap.text = "napped   " + fmt_dur(stats.nap_seconds)
+    pet_tok.text = "tokens   %s" % fmtk(stats.tokens)
+    pet_today.text = "today    %s" % fmtk(tama.tokens_today)
+
+
+def set_screen(name):
+    global screen
+    screen = name
+    home_grp.hidden = name != "home"
+    pet_grp.hidden = name != "pet"
+    info_grp.hidden = name != "info"
+    for _i, _nm in enumerate(bud_screens.TABS):
+        tab_lbls[_i].color = FG if _nm == name else DIM
+    if name == "pet":
+        draw_pet()
+
+
+set_screen("home")
 play("startup_chime")
 print("[ui] buddy UI ready; waiting for Claude")
 
@@ -428,6 +504,12 @@ while True:
                         play("error_buzz")
                         react("dizzy", AMBER, 1.5)
                         print("[touch] DENY id=%s" % prompt_id)
+                elif not last_appr:
+                    t = bud_screens.tab_hit(px, py, W)
+                    if t and t != screen:
+                        play("jump_sound")
+                        set_screen(t)
+                        print("[ui] screen -> %s" % t)
 
     # pet reactions / blink + screensaver dim after idle
     now = time.monotonic()
@@ -455,6 +537,9 @@ while True:
             pet.text = blink_face(f)             # normal blink
             blink_until = now + 0.14
         blinking = True
+    if screen == "pet" and now - last_pet_draw > 0.5:
+        draw_pet()
+        last_pet_draw = now
     if not dimmed and (now - last_lively) > SS_IDLE:
         set_bright(0.15)
         dimmed = True

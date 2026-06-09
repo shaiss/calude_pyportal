@@ -27,3 +27,17 @@ def test_tap_outside_horizontal_margin_is_none():
 def test_buttons_fit_on_screen():
     # both 92px buttons + gap must fit within the 480px-tall panel
     assert SC.DENY_Y + SC.BTN_H <= H
+
+
+def test_tab_hit_thirds():
+    assert SC.tab_hit(40, 10, W) == "home"
+    assert SC.tab_hit(160, 10, W) == "pet"
+    assert SC.tab_hit(290, 10, W) == "info"
+
+
+def test_tab_hit_rightmost_edge_clamps_to_info():
+    assert SC.tab_hit(W - 1, 10, W) == "info"
+
+
+def test_tab_hit_below_bar_is_none():
+    assert SC.tab_hit(160, SC.TAB_H + 5, W) is None

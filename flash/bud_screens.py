@@ -21,3 +21,18 @@ def approval_hit(px, py, w, h):
     if DENY_Y <= py <= DENY_Y + BTN_H:
         return "deny"
     return None
+
+
+# --- top tab bar: HOME | PET | INFO (equal thirds across the top) -------------------
+TAB_H = 30
+TABS = ("home", "pet", "info")
+
+
+def tab_hit(px, py, w):
+    """Map a tap in the top tab band to a screen name, else None."""
+    if py > TAB_H:
+        return None
+    i = px // (w // len(TABS))
+    if i >= len(TABS):
+        i = len(TABS) - 1
+    return TABS[i]
