@@ -12,6 +12,10 @@ import terminalio
 from adafruit_display_text import label
 from adafruit_display_shapes.rect import Rect
 import adafruit_touchscreen
+import bud_proto
+import bud_screens
+import bud_stats
+import microcontroller
 
 # ---------- ESP32 (native BLE firmware) in run mode ----------
 gpio0 = digitalio.DigitalInOut(board.ESP_GPIO0)
@@ -193,39 +197,89 @@ def react(face_key, color, dur=1.5, then=None):
 root = displayio.Group()
 root.append(Rect(0, 0, W, H, fill=BG))
 
-badge = label.Label(terminalio.FONT, text="starting", color=DIM, scale=2, x=10, y=18)
-root.append(badge)
+# top tab bar: HOME | PET | INFO (tap to switch screens); active tab brightened.
+TAB_W = W // 3
+tab_lbls = []
+for _i, _nm in enumerate(bud_screens.TABS):
+    _lb = label.Label(terminalio.FONT, text=_nm.upper(), color=DIM, scale=3,
+                      x=_i * TAB_W + 12, y=16)
+    tab_lbls.append(_lb)
+    root.append(_lb)
+root.append(Rect(0, bud_screens.TAB_H, W, 1, fill=DIV))
 
-# live touch readout (raw landscape -> portrait); stays blank until the screen is tapped
-dbg = label.Label(terminalio.FONT, text="", color=AMBER, scale=2, x=10, y=44)
-root.append(dbg)
-
+# ---- HOME: pet + status HUD ----
+home_grp = displayio.Group()
+badge = label.Label(terminalio.FONT, text="starting", color=DIM, scale=2, x=10, y=62)
+home_grp.append(badge)
+dbg = label.Label(terminalio.FONT, text="", color=AMBER, scale=2, x=10, y=86)
+home_grp.append(dbg)
 pet = label.Label(terminalio.FONT, text=FACES["idle"], color=FG, scale=6,
-                  x=46, y=70, line_spacing=0.95)
-root.append(pet)
-
-root.append(Rect(8, 286, W - 16, 2, fill=DIV))
-
-counts = label.Label(terminalio.FONT, text="", color=FG, scale=2, x=10, y=312)
-root.append(counts)
-msg = label.Label(terminalio.FONT, text="", color=DIM, scale=2, x=10, y=348, line_spacing=1.1)
-root.append(msg)
+                  x=46, y=122, line_spacing=0.95)
+home_grp.append(pet)
+home_grp.append(Rect(8, 300, W - 16, 2, fill=DIV))
+counts = label.Label(terminalio.FONT, text="", color=FG, scale=2, x=10, y=322)
+home_grp.append(counts)
+msg = label.Label(terminalio.FONT, text="", color=DIM, scale=2, x=10, y=356, line_spacing=1.1)
+home_grp.append(msg)
 toks = label.Label(terminalio.FONT, text="", color=DIM, scale=2, x=10, y=462)
-root.append(toks)
+home_grp.append(toks)
+root.append(home_grp)
 
-# approval panel (hidden until a prompt arrives) -- big zones (touch wiring is v2)
+# ---- PET: gamification stats (the photo screen); texts set by draw_pet() ----
+pet_grp = displayio.Group()
+_py = bud_screens.TAB_H + 14
+pet_title = label.Label(terminalio.FONT, text="Buddy", color=FG, scale=2, x=10, y=_py)
+pet_mood = label.Label(terminalio.FONT, text="", color=PINK, scale=2, x=10, y=_py + 30)
+pet_fed = label.Label(terminalio.FONT, text="", color=GREEN, scale=2, x=10, y=_py + 56)
+pet_energy = label.Label(terminalio.FONT, text="", color=AMBER, scale=2, x=10, y=_py + 82)
+pet_lv = label.Label(terminalio.FONT, text="", color=FG, scale=3, x=10, y=_py + 118)
+pet_appr = label.Label(terminalio.FONT, text="", color=DIM, scale=2, x=10, y=_py + 152)
+pet_deny = label.Label(terminalio.FONT, text="", color=DIM, scale=2, x=10, y=_py + 176)
+pet_nap = label.Label(terminalio.FONT, text="", color=DIM, scale=2, x=10, y=_py + 200)
+pet_tok = label.Label(terminalio.FONT, text="", color=DIM, scale=2, x=10, y=_py + 224)
+pet_today = label.Label(terminalio.FONT, text="", color=DIM, scale=2, x=10, y=_py + 248)
+for _l in (pet_title, pet_mood, pet_fed, pet_energy, pet_lv,
+           pet_appr, pet_deny, pet_nap, pet_tok, pet_today):
+    pet_grp.append(_l)
+pet_grp.hidden = True
+root.append(pet_grp)
+
+# ---- INFO: what it is + hardware (static for now) ----
+info_grp = displayio.Group()
+_iy = bud_screens.TAB_H + 14
+_info_lines = [
+    ("I watch your Claude", DIM), ("desktop sessions and", DIM),
+    ("surface approvals here.", DIM), ("", DIM),
+    ("tap a prompt's", FG), ("APPROVE / DENY.", FG), ("", DIM),
+    ("PyPortal Titano", DIM), ("SAMD51 + ESP32 BLE", DIM), ("", DIM),
+    ("github.com/shaiss", DIM), ("/calude_pyportal", DIM),
+]
+for _j, (_t, _c) in enumerate(_info_lines):
+    info_grp.append(label.Label(terminalio.FONT, text=_t, color=_c, scale=2,
+                                x=10, y=_iy + _j * 22))
+info_grp.hidden = True
+root.append(info_grp)
+
+# approval overlay: full-screen, so the base pet/HUD is covered -- the cat shrinks to a
+# small chip and the screen is dominated by big APPROVE / DENY buttons (bud_screens geometry).
 appr = displayio.Group()
-appr.append(Rect(6, 292, W - 12, H - 298, fill=0x161B22, outline=RED))
-appr_head = label.Label(terminalio.FONT, text="approve?", color=AMBER, scale=2, x=16, y=314)
+appr.append(Rect(0, 0, W, H, fill=BG))                       # opaque cover over the base UI
+appr_face = label.Label(terminalio.FONT, text=FACES["attention"], color=RED, scale=2,
+                        x=196, y=26, line_spacing=0.95)        # the shrunken pet, top-right
+appr.append(appr_face)
+appr_head = label.Label(terminalio.FONT, text="approve?", color=AMBER, scale=2, x=14, y=40)
 appr.append(appr_head)
-appr_tool = label.Label(terminalio.FONT, text="", color=FG, scale=2, x=16, y=344, line_spacing=1.0)
+appr_tool = label.Label(terminalio.FONT, text="", color=FG, scale=3, x=14, y=120, line_spacing=1.0)
 appr.append(appr_tool)
-appr_hint = label.Label(terminalio.FONT, text="", color=DIM, scale=2, x=16, y=378, line_spacing=1.1)
+appr_hint = label.Label(terminalio.FONT, text="", color=DIM, scale=2, x=14, y=180, line_spacing=1.1)
 appr.append(appr_hint)
-appr.append(Rect(12, 412, (W // 2) - 18, 58, fill=0x0C3A17, outline=GREEN))
-appr.append(label.Label(terminalio.FONT, text="APPROVE", color=GREEN, scale=2, x=26, y=441))
-appr.append(Rect(W // 2 + 6, 412, (W // 2) - 18, 58, fill=0x3A0C0C, outline=RED))
-appr.append(label.Label(terminalio.FONT, text="DENY", color=RED, scale=2, x=W // 2 + 40, y=441))
+_AM, _AH = bud_screens.BTN_MARGIN, bud_screens.BTN_H
+appr.append(Rect(_AM, bud_screens.APPROVE_Y, W - 2 * _AM, _AH, fill=0x0C3A17, outline=GREEN))
+appr.append(label.Label(terminalio.FONT, text="APPROVE", color=GREEN, scale=4,
+                        x=W // 2 - 84, y=bud_screens.APPROVE_Y + 28))
+appr.append(Rect(_AM, bud_screens.DENY_Y, W - 2 * _AM, _AH, fill=0x3A0C0C, outline=RED))
+appr.append(label.Label(terminalio.FONT, text="DENY", color=RED, scale=4,
+                        x=W // 2 - 48, y=bud_screens.DENY_Y + 28))
 appr.hidden = True
 root.append(appr)
 
@@ -237,6 +291,16 @@ display.root_group = root
 
 # ---------- state ----------
 boot = time.monotonic()
+tama = bud_proto.TamaState()
+stats = bud_stats.Stats.load(microcontroller.nvm)
+print("[stats] loaded: lvl=%d tok=%d appr=%d deny=%d name=%s owner=%s (nvm=%dB, need=%dB)"
+      % (stats.level, stats.tokens, stats.approvals, stats.denials,
+         stats.pet_name, stats.owner_name or "-",
+         len(microcontroller.nvm), bud_stats.NVM_SIZE))
+screen = "home"
+last_pet_draw = 0.0
+energy_at_nap = 3
+last_nap_end = boot
 last_data = 0.0
 buf = b""
 last_state = ""
@@ -282,16 +346,16 @@ def show_approval(prompt):
     if pid != prompt_id:
         prompt_id = pid
         prompt_t0 = time.monotonic()
+        appr_face.text = FACES["attention"]
+        appr_face.color = RED
         play("beep")
     waited = int(time.monotonic() - prompt_t0)
     appr_head.text = "approve?  " + fmt_dur(waited)
     appr_head.color = RED if waited >= 10 else AMBER
-    appr_tool.text = wrap2(prompt.get("tool", "?"), 22)
-    appr_hint.text = short_mid(prompt.get("hint", ""), 22)
+    appr_tool.text = wrap2(prompt.get("tool", "?"), 14)   # scale-3 -> ~14 chars wide
+    appr_hint.text = short_mid(prompt.get("hint", ""), 26)
     if not last_appr:
         appr.hidden = False
-        msg.hidden = True
-        toks.hidden = True
         last_appr = True
 
 
@@ -299,12 +363,57 @@ def hide_approval():
     global last_appr
     if last_appr:
         appr.hidden = True
-        msg.hidden = False
-        toks.hidden = False
         last_appr = False
 
 
+def draw_pet():
+    pet_title.text = (stats.owner_name + "'s " + stats.pet_name) if stats.owner_name else stats.pet_name
+    m = stats.mood()
+    pet_mood.text = "mood   " + "* " * m + ". " * (4 - m)
+    fed = stats.fed()
+    pet_fed.text = "fed    " + "#" * fed + "." * (10 - fed)
+    en = bud_stats.energy_tier(energy_at_nap, (time.monotonic() - last_nap_end) / 3600.0)
+    pet_energy.text = "energy " + "|" * en + "_" * (5 - en)
+    pet_lv.text = "Lv %d" % stats.level
+    pet_appr.text = "approved %d" % stats.approvals
+    pet_deny.text = "denied   %d" % stats.denials
+    pet_nap.text = "napped   " + fmt_dur(stats.nap_seconds)
+    pet_tok.text = "tokens   %s" % fmtk(stats.tokens)
+    pet_today.text = "today    %s" % fmtk(tama.tokens_today)
+
+
+def set_screen(name):
+    global screen
+    screen = name
+    home_grp.hidden = name != "home"
+    pet_grp.hidden = name != "pet"
+    info_grp.hidden = name != "info"
+    for _i, _nm in enumerate(bud_screens.TABS):
+        tab_lbls[_i].color = FG if _nm == name else DIM
+    if name == "pet":
+        draw_pet()
+
+
+set_screen("home")
+
+# boot splash: greet by name, then settle into HOME (reference parity)
+_splash = displayio.Group()
+_splash.append(Rect(0, 0, W, H, fill=BG))
+if stats.owner_name:
+    _l1 = stats.owner_name + "'s"
+    _splash.append(label.Label(terminalio.FONT, text=_l1, color=FG, scale=3,
+                               x=max(4, W // 2 - len(_l1) * 9), y=H // 2 - 24))
+    _splash.append(label.Label(terminalio.FONT, text=stats.pet_name, color=PINK, scale=3,
+                               x=max(4, W // 2 - len(stats.pet_name) * 9), y=H // 2 + 16))
+else:
+    _splash.append(label.Label(terminalio.FONT, text="Hello!", color=PINK, scale=4,
+                               x=W // 2 - 48, y=H // 2 - 24))
+    _splash.append(label.Label(terminalio.FONT, text="a buddy appears", color=DIM, scale=2,
+                               x=W // 2 - 90, y=H // 2 + 20))
+display.root_group = _splash
 play("startup_chime")
+time.sleep(1.8)
+display.root_group = root
 print("[ui] buddy UI ready; waiting for Claude")
 
 while True:
@@ -320,50 +429,55 @@ while True:
             line = line.strip()
             if not line:
                 continue
-            # status poll -> ack (keeps the link alive)
-            if b'"cmd"' in line and b'"status"' in line:
-                up = int(time.monotonic() - boot)
-                uart.write(('{"ack":"status","ok":true,"data":{"name":"Claude-PyPortal",'
-                            '"sec":true,"sys":{"up":%d}}}\n' % up).encode("utf-8"))
+            # route the line through bud_proto; `reply` is the status/owner/name ack (if any)
+            decoded = line.decode("utf-8", "ignore")
+            reply = bud_proto.parse_line(decoded, tama, uptime=int(time.monotonic() - boot))
+            if reply is not None:
+                uart.write((reply + "\n").encode("utf-8"))
                 last_data = time.monotonic()
-                continue
-            # heartbeat snapshot -> drive the UI
-            if line.startswith(b'{"total"'):
-                try:
-                    d = json.loads(line)
-                except Exception:
-                    continue
+            # owner / pet-name commands -> persist + reflect on the PET screen title
+            if tama.owner_pending is not None:
+                stats.owner_name = tama.owner_pending
+                tama.owner_pending = None
+                stats.save(microcontroller.nvm)
+            if tama.name_pending is not None:
+                stats.pet_name = tama.name_pending or "Buddy"
+                tama.name_pending = None
+                stats.save(microcontroller.nvm)
+            # heartbeat -> drive the UI from tama (parse_line already updated it)
+            if decoded.startswith('{"total"'):
                 last_data = time.monotonic()
-                running = d.get("running", 0)
-                waiting = d.get("waiting", 0)
-                total = d.get("total", 0)
-                prompt = d.get("prompt")
-                if waiting and waiting > 0:
+                stats.on_bridge_tokens(tama.tokens)
+                if stats.poll_levelup():
+                    stats.save(microcontroller.nvm)
+                    react("celebrate", AMBER, 2.5)
+                    print("[stats] LEVEL UP -> %d" % stats.level)
+                if tama.waiting > 0:
                     set_state("attention")
-                elif running and running > 0:
+                elif tama.running > 0:
                     set_state("busy")
                 else:
                     set_state("idle")
-                if (waiting and waiting > 0) or (running and running > 0) or prompt:
+                if tama.waiting > 0 or tama.running > 0 or tama.prompt_id:
                     last_lively = time.monotonic()
                     if dimmed:
                         set_bright(1.0)
                         dimmed = False
-                cs = "run %d  wait %d  tot %d" % (running, waiting, total)
+                cs = "run %d  wait %d  tot %d" % (tama.running, tama.waiting, tama.total)
                 if cs != last_counts:
                     counts.text = cs
                     last_counts = cs
-                if prompt and waiting and waiting > 0:
-                    show_approval(prompt)
+                if tama.prompt_id and tama.waiting > 0:
+                    show_approval({"id": tama.prompt_id, "tool": tama.prompt_tool,
+                                   "hint": tama.prompt_hint})
                 else:
                     hide_approval()
-                    mtxt = wrap2(d.get("msg", ""), 26)
+                    mtxt = wrap2(tama.msg, 26)
                     if mtxt != last_msg:
                         msg.text = mtxt
                         last_msg = mtxt
-                    toks.text = "tok %s  today %s" % (fmtk(d.get("tokens", 0)),
-                                                      fmtk(d.get("tokens_today", 0)))
-                continue
+                    toks.text = "tok %s  today %s" % (fmtk(tama.tokens), fmtk(tama.tokens_today))
+            continue
             # turn events / others: ignored in v1 (can be large)
 
     # ---- touch: live readout + haptic + approve / deny ----
@@ -393,24 +507,37 @@ while True:
                     set_bright(1.0)
                     dimmed = False
                 if last_appr and prompt_id and (nowt - last_touch_act) > 1.2:
-                    if 412 <= py <= 470 and 12 <= px <= 154:
-                        uart.write(('{"cmd":"permission","id":"%s","decision":"once"}\n'
-                                    % prompt_id).encode("utf-8"))
+                    hit = bud_screens.approval_hit(px, py, W, H)
+                    if hit == "approve":
+                        uart.write((bud_proto.permission_cmd(prompt_id, "once") + "\n").encode("utf-8"))
                         appr_head.text = "sent: approve"
                         appr_head.color = GREEN
+                        appr_face.text = FACES["celebrate"]
+                        appr_face.color = GREEN
                         last_touch_act = nowt
+                        stats.on_approval(int(nowt - prompt_t0))
+                        stats.save(microcontroller.nvm)
                         play("success_chime")
                         react("celebrate", GREEN, 0.8, then=("heart", PINK, 0.9))
                         print("[touch] APPROVE id=%s" % prompt_id)
-                    elif 412 <= py <= 470 and 166 <= px <= 308:
-                        uart.write(('{"cmd":"permission","id":"%s","decision":"deny"}\n'
-                                    % prompt_id).encode("utf-8"))
+                    elif hit == "deny":
+                        uart.write((bud_proto.permission_cmd(prompt_id, "deny") + "\n").encode("utf-8"))
                         appr_head.text = "sent: deny"
                         appr_head.color = RED
+                        appr_face.text = FACES["dizzy"]
+                        appr_face.color = AMBER
                         last_touch_act = nowt
+                        stats.on_denial()
+                        stats.save(microcontroller.nvm)
                         play("error_buzz")
                         react("dizzy", AMBER, 1.5)
                         print("[touch] DENY id=%s" % prompt_id)
+                elif not last_appr:
+                    t = bud_screens.tab_hit(px, py, W)
+                    if t and t != screen:
+                        play("jump_sound")
+                        set_screen(t)
+                        print("[ui] screen -> %s" % t)
 
     # pet reactions / blink + screensaver dim after idle
     now = time.monotonic()
@@ -438,6 +565,9 @@ while True:
             pet.text = blink_face(f)             # normal blink
             blink_until = now + 0.14
         blinking = True
+    if screen == "pet" and now - last_pet_draw > 0.5:
+        draw_pet()
+        last_pet_draw = now
     if not dimmed and (now - last_lively) > SS_IDLE:
         set_bright(0.15)
         dimmed = True

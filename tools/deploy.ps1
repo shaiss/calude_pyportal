@@ -9,14 +9,19 @@
 param([string]$Drive = 'D:')
 
 $flash = Join-Path $PSScriptRoot '..\flash'
-foreach ($pair in @(
-    @{ src = 'buddy_audio.py'; dst = 'buddy_audio.py' },   # audio/haptic module
-    @{ src = 'buddy_ui.py';    dst = 'code.py'        }     # THE app (deploy last)
-)) {
-    $s = Join-Path $flash $pair.src
-    $d = Join-Path $Drive $pair.dst
-    Copy-Item $s $d -Force
-    Write-Output ("  {0,-16} -> {1}" -f $pair.src, $d)
+
+# Runtime modules that belong on the device. Deliberately NOT a blanket flash\*.py copy:
+# boot.py / passthrough*.py / run_bridge.py / buddy.py are flashing & bring-up utilities,
+# and boot.py in particular changes USB behavior -- they must never land as runtime code.
+# Convention: every device module beyond buddy_audio is named bud_*.py.
+$modules = @('buddy_audio.py')
+$modules += Get-ChildItem (Join-Path $flash 'bud_*.py') | ForEach-Object { $_.Name }
+foreach ($name in $modules) {
+    Copy-Item (Join-Path $flash $name) (Join-Path $Drive $name) -Force
+    Write-Output ("  {0,-16} -> {1}" -f $name, (Join-Path $Drive $name))
 }
+# THE app last, as code.py (so a partial copy never leaves a half-updated app running)
+Copy-Item (Join-Path $flash 'buddy_ui.py') (Join-Path $Drive 'code.py') -Force
+Write-Output ("  {0,-16} -> {1}" -f 'buddy_ui.py', (Join-Path $Drive 'code.py'))
 Write-Output ("Deployed. Auto-reload will apply it (ESP32 re-advertises; app reconnects in ~30-60s).")
 Write-Output ("Verify:  python tools\cam.py 0     # grab a webcam frame")
