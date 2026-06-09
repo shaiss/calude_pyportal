@@ -92,6 +92,16 @@ def play(name):
         pass
 
 
+# onboard NeoPixel -- pulses red on attention (gated by the LED setting)
+try:
+    import neopixel
+    pixel = neopixel.NeoPixel(board.NEOPIXEL, 1, brightness=0.3, auto_write=True)
+    pixel.fill(0)
+except Exception as e:
+    print("[ui] neopixel init err:", e)
+    pixel = None
+
+
 BG = 0x000000
 FG = 0xFFFFFF
 DIM = 0x8B949E
@@ -314,6 +324,11 @@ species_idx = stats.species_idx % bud_species.count()
 react_state = "idle"
 reset_armed = False
 reset_t = 0.0
+_demo_step = -1
+_DEMO = ((2, 0, 8, "yarn build", 120000, 30000),
+         (0, 1, 3, "approve: Bash", 45000, 12000),
+         (0, 0, 1, "thinking...", 80000, 20000),
+         (3, 0, 9, "running tests", 200000, 51000))
 last_data = 0.0
 buf = b""
 last_state = ""
@@ -616,6 +631,12 @@ while True:
             anim_state = react_state
     pet.text = bud_species.frame(species_idx, anim_state, now)
     pet.color = SCOL.get(anim_state, FG)
+    if pixel is not None:
+        if stats.setting(bud_stats.S_LED) and last_state == "attention":
+            _ph = (now * 1.5) % 2.0
+            pixel.fill((int(30 + (_ph if _ph < 1.0 else 2.0 - _ph) * 210), 0, 0))
+        else:
+            pixel.fill(0)
     if screen == "pet" and now - last_pet_draw > 0.5:
         draw_pet()
         last_pet_draw = now
@@ -627,7 +648,23 @@ while True:
         dot.x = -20
         dot.y = -20
 
-    # link liveness
-    if time.monotonic() - last_data > 8:
-        set_state("disc")
+    # link liveness: fresh data drives states above; stale -> demo (if on) or disconnected
+    if (time.monotonic() - last_data) > 8:
+        if stats.setting(bud_stats.S_DEMO):
+            _step = int((now - boot) / 5) % len(_DEMO)
+            if _step != _demo_step:
+                _demo_step = _step
+                _sc = _DEMO[_step]
+                tama.running, tama.waiting, tama.total = _sc[0], _sc[1], _sc[2]
+                tama.msg, tama.tokens, tama.tokens_today = _sc[3], _sc[4], _sc[5]
+                set_state("attention" if tama.waiting else ("busy" if tama.running else "idle"))
+                counts.text = "run %d  wait %d  tot %d" % (tama.running, tama.waiting, tama.total)
+                last_counts = counts.text
+                if not msg.hidden:
+                    msg.text = wrap2(tama.msg, 26)
+                if not toks.hidden:
+                    toks.text = "tok %s  today %s" % (fmtk(tama.tokens), fmtk(tama.tokens_today))
+            last_lively = now
+        else:
+            set_state("disc")
     time.sleep(0.01)
