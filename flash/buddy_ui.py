@@ -12,6 +12,7 @@ import terminalio
 from adafruit_display_text import label
 from adafruit_display_shapes.rect import Rect
 import adafruit_touchscreen
+import bud_proto
 
 # ---------- ESP32 (native BLE firmware) in run mode ----------
 gpio0 = digitalio.DigitalInOut(board.ESP_GPIO0)
@@ -237,6 +238,7 @@ display.root_group = root
 
 # ---------- state ----------
 boot = time.monotonic()
+tama = bud_proto.TamaState()
 last_data = 0.0
 buf = b""
 last_state = ""
@@ -320,50 +322,41 @@ while True:
             line = line.strip()
             if not line:
                 continue
-            # status poll -> ack (keeps the link alive)
-            if b'"cmd"' in line and b'"status"' in line:
-                up = int(time.monotonic() - boot)
-                uart.write(('{"ack":"status","ok":true,"data":{"name":"Claude-PyPortal",'
-                            '"sec":true,"sys":{"up":%d}}}\n' % up).encode("utf-8"))
+            # route the line through bud_proto; `reply` is the status/owner/name ack (if any)
+            decoded = line.decode("utf-8", "ignore")
+            reply = bud_proto.parse_line(decoded, tama, uptime=int(time.monotonic() - boot))
+            if reply is not None:
+                uart.write((reply + "\n").encode("utf-8"))
                 last_data = time.monotonic()
-                continue
-            # heartbeat snapshot -> drive the UI
-            if line.startswith(b'{"total"'):
-                try:
-                    d = json.loads(line)
-                except Exception:
-                    continue
+            # heartbeat -> drive the UI from tama (parse_line already updated it)
+            if decoded.startswith('{"total"'):
                 last_data = time.monotonic()
-                running = d.get("running", 0)
-                waiting = d.get("waiting", 0)
-                total = d.get("total", 0)
-                prompt = d.get("prompt")
-                if waiting and waiting > 0:
+                if tama.waiting > 0:
                     set_state("attention")
-                elif running and running > 0:
+                elif tama.running > 0:
                     set_state("busy")
                 else:
                     set_state("idle")
-                if (waiting and waiting > 0) or (running and running > 0) or prompt:
+                if tama.waiting > 0 or tama.running > 0 or tama.prompt_id:
                     last_lively = time.monotonic()
                     if dimmed:
                         set_bright(1.0)
                         dimmed = False
-                cs = "run %d  wait %d  tot %d" % (running, waiting, total)
+                cs = "run %d  wait %d  tot %d" % (tama.running, tama.waiting, tama.total)
                 if cs != last_counts:
                     counts.text = cs
                     last_counts = cs
-                if prompt and waiting and waiting > 0:
-                    show_approval(prompt)
+                if tama.prompt_id and tama.waiting > 0:
+                    show_approval({"id": tama.prompt_id, "tool": tama.prompt_tool,
+                                   "hint": tama.prompt_hint})
                 else:
                     hide_approval()
-                    mtxt = wrap2(d.get("msg", ""), 26)
+                    mtxt = wrap2(tama.msg, 26)
                     if mtxt != last_msg:
                         msg.text = mtxt
                         last_msg = mtxt
-                    toks.text = "tok %s  today %s" % (fmtk(d.get("tokens", 0)),
-                                                      fmtk(d.get("tokens_today", 0)))
-                continue
+                    toks.text = "tok %s  today %s" % (fmtk(tama.tokens), fmtk(tama.tokens_today))
+            continue
             # turn events / others: ignored in v1 (can be large)
 
     # ---- touch: live readout + haptic + approve / deny ----
