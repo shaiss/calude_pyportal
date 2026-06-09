@@ -13,6 +13,7 @@ from adafruit_display_text import label
 from adafruit_display_shapes.rect import Rect
 import adafruit_touchscreen
 import bud_proto
+import bud_screens
 
 # ---------- ESP32 (native BLE firmware) in run mode ----------
 gpio0 = digitalio.DigitalInOut(board.ESP_GPIO0)
@@ -214,19 +215,26 @@ root.append(msg)
 toks = label.Label(terminalio.FONT, text="", color=DIM, scale=2, x=10, y=462)
 root.append(toks)
 
-# approval panel (hidden until a prompt arrives) -- big zones (touch wiring is v2)
+# approval overlay: full-screen, so the base pet/HUD is covered -- the cat shrinks to a
+# small chip and the screen is dominated by big APPROVE / DENY buttons (bud_screens geometry).
 appr = displayio.Group()
-appr.append(Rect(6, 292, W - 12, H - 298, fill=0x161B22, outline=RED))
-appr_head = label.Label(terminalio.FONT, text="approve?", color=AMBER, scale=2, x=16, y=314)
+appr.append(Rect(0, 0, W, H, fill=BG))                       # opaque cover over the base UI
+appr_face = label.Label(terminalio.FONT, text=FACES["attention"], color=RED, scale=2,
+                        x=196, y=26, line_spacing=0.95)        # the shrunken pet, top-right
+appr.append(appr_face)
+appr_head = label.Label(terminalio.FONT, text="approve?", color=AMBER, scale=2, x=14, y=40)
 appr.append(appr_head)
-appr_tool = label.Label(terminalio.FONT, text="", color=FG, scale=2, x=16, y=344, line_spacing=1.0)
+appr_tool = label.Label(terminalio.FONT, text="", color=FG, scale=3, x=14, y=120, line_spacing=1.0)
 appr.append(appr_tool)
-appr_hint = label.Label(terminalio.FONT, text="", color=DIM, scale=2, x=16, y=378, line_spacing=1.1)
+appr_hint = label.Label(terminalio.FONT, text="", color=DIM, scale=2, x=14, y=180, line_spacing=1.1)
 appr.append(appr_hint)
-appr.append(Rect(12, 412, (W // 2) - 18, 58, fill=0x0C3A17, outline=GREEN))
-appr.append(label.Label(terminalio.FONT, text="APPROVE", color=GREEN, scale=2, x=26, y=441))
-appr.append(Rect(W // 2 + 6, 412, (W // 2) - 18, 58, fill=0x3A0C0C, outline=RED))
-appr.append(label.Label(terminalio.FONT, text="DENY", color=RED, scale=2, x=W // 2 + 40, y=441))
+_AM, _AH = bud_screens.BTN_MARGIN, bud_screens.BTN_H
+appr.append(Rect(_AM, bud_screens.APPROVE_Y, W - 2 * _AM, _AH, fill=0x0C3A17, outline=GREEN))
+appr.append(label.Label(terminalio.FONT, text="APPROVE", color=GREEN, scale=4,
+                        x=W // 2 - 84, y=bud_screens.APPROVE_Y + 28))
+appr.append(Rect(_AM, bud_screens.DENY_Y, W - 2 * _AM, _AH, fill=0x3A0C0C, outline=RED))
+appr.append(label.Label(terminalio.FONT, text="DENY", color=RED, scale=4,
+                        x=W // 2 - 48, y=bud_screens.DENY_Y + 28))
 appr.hidden = True
 root.append(appr)
 
@@ -284,16 +292,16 @@ def show_approval(prompt):
     if pid != prompt_id:
         prompt_id = pid
         prompt_t0 = time.monotonic()
+        appr_face.text = FACES["attention"]
+        appr_face.color = RED
         play("beep")
     waited = int(time.monotonic() - prompt_t0)
     appr_head.text = "approve?  " + fmt_dur(waited)
     appr_head.color = RED if waited >= 10 else AMBER
-    appr_tool.text = wrap2(prompt.get("tool", "?"), 22)
-    appr_hint.text = short_mid(prompt.get("hint", ""), 22)
+    appr_tool.text = wrap2(prompt.get("tool", "?"), 14)   # scale-3 -> ~14 chars wide
+    appr_hint.text = short_mid(prompt.get("hint", ""), 26)
     if not last_appr:
         appr.hidden = False
-        msg.hidden = True
-        toks.hidden = True
         last_appr = True
 
 
@@ -301,8 +309,6 @@ def hide_approval():
     global last_appr
     if last_appr:
         appr.hidden = True
-        msg.hidden = False
-        toks.hidden = False
         last_appr = False
 
 
@@ -386,20 +392,23 @@ while True:
                     set_bright(1.0)
                     dimmed = False
                 if last_appr and prompt_id and (nowt - last_touch_act) > 1.2:
-                    if 412 <= py <= 470 and 12 <= px <= 154:
-                        uart.write(('{"cmd":"permission","id":"%s","decision":"once"}\n'
-                                    % prompt_id).encode("utf-8"))
+                    hit = bud_screens.approval_hit(px, py, W, H)
+                    if hit == "approve":
+                        uart.write((bud_proto.permission_cmd(prompt_id, "once") + "\n").encode("utf-8"))
                         appr_head.text = "sent: approve"
                         appr_head.color = GREEN
+                        appr_face.text = FACES["celebrate"]
+                        appr_face.color = GREEN
                         last_touch_act = nowt
                         play("success_chime")
                         react("celebrate", GREEN, 0.8, then=("heart", PINK, 0.9))
                         print("[touch] APPROVE id=%s" % prompt_id)
-                    elif 412 <= py <= 470 and 166 <= px <= 308:
-                        uart.write(('{"cmd":"permission","id":"%s","decision":"deny"}\n'
-                                    % prompt_id).encode("utf-8"))
+                    elif hit == "deny":
+                        uart.write((bud_proto.permission_cmd(prompt_id, "deny") + "\n").encode("utf-8"))
                         appr_head.text = "sent: deny"
                         appr_head.color = RED
+                        appr_face.text = FACES["dizzy"]
+                        appr_face.color = AMBER
                         last_touch_act = nowt
                         play("error_buzz")
                         react("dizzy", AMBER, 1.5)
