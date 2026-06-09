@@ -293,8 +293,9 @@ display.root_group = root
 boot = time.monotonic()
 tama = bud_proto.TamaState()
 stats = bud_stats.Stats.load(microcontroller.nvm)
-print("[stats] loaded: lvl=%d tok=%d appr=%d deny=%d (nvm=%dB, need=%dB)"
+print("[stats] loaded: lvl=%d tok=%d appr=%d deny=%d name=%s owner=%s (nvm=%dB, need=%dB)"
       % (stats.level, stats.tokens, stats.approvals, stats.denials,
+         stats.pet_name, stats.owner_name or "-",
          len(microcontroller.nvm), bud_stats.NVM_SIZE))
 screen = "home"
 last_pet_draw = 0.0
@@ -394,7 +395,25 @@ def set_screen(name):
 
 
 set_screen("home")
+
+# boot splash: greet by name, then settle into HOME (reference parity)
+_splash = displayio.Group()
+_splash.append(Rect(0, 0, W, H, fill=BG))
+if stats.owner_name:
+    _l1 = stats.owner_name + "'s"
+    _splash.append(label.Label(terminalio.FONT, text=_l1, color=FG, scale=3,
+                               x=max(4, W // 2 - len(_l1) * 9), y=H // 2 - 24))
+    _splash.append(label.Label(terminalio.FONT, text=stats.pet_name, color=PINK, scale=3,
+                               x=max(4, W // 2 - len(stats.pet_name) * 9), y=H // 2 + 16))
+else:
+    _splash.append(label.Label(terminalio.FONT, text="Hello!", color=PINK, scale=4,
+                               x=W // 2 - 48, y=H // 2 - 24))
+    _splash.append(label.Label(terminalio.FONT, text="a buddy appears", color=DIM, scale=2,
+                               x=W // 2 - 90, y=H // 2 + 20))
+display.root_group = _splash
 play("startup_chime")
+time.sleep(1.8)
+display.root_group = root
 print("[ui] buddy UI ready; waiting for Claude")
 
 while True:
@@ -416,6 +435,15 @@ while True:
             if reply is not None:
                 uart.write((reply + "\n").encode("utf-8"))
                 last_data = time.monotonic()
+            # owner / pet-name commands -> persist + reflect on the PET screen title
+            if tama.owner_pending is not None:
+                stats.owner_name = tama.owner_pending
+                tama.owner_pending = None
+                stats.save(microcontroller.nvm)
+            if tama.name_pending is not None:
+                stats.pet_name = tama.name_pending or "Buddy"
+                tama.name_pending = None
+                stats.save(microcontroller.nvm)
             # heartbeat -> drive the UI from tama (parse_line already updated it)
             if decoded.startswith('{"total"'):
                 last_data = time.monotonic()
