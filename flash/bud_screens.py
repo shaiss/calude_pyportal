@@ -24,7 +24,7 @@ def approval_hit(px, py, w, h):
 
 
 # --- top tab bar: HOME | PET | INFO (equal thirds across the top) -------------------
-TAB_H = 30
+TAB_H = 45          # 1.5x the original 30px -> bigger, easier touch target
 TABS = ("home", "pet", "info")
 
 

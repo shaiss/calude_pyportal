@@ -201,20 +201,20 @@ root.append(Rect(0, 0, W, H, fill=BG))
 TAB_W = W // 3
 tab_lbls = []
 for _i, _nm in enumerate(bud_screens.TABS):
-    _lb = label.Label(terminalio.FONT, text=_nm.upper(), color=DIM, scale=2,
-                      x=_i * TAB_W + 16, y=12)
+    _lb = label.Label(terminalio.FONT, text=_nm.upper(), color=DIM, scale=3,
+                      x=_i * TAB_W + 12, y=16)
     tab_lbls.append(_lb)
     root.append(_lb)
 root.append(Rect(0, bud_screens.TAB_H, W, 1, fill=DIV))
 
 # ---- HOME: pet + status HUD ----
 home_grp = displayio.Group()
-badge = label.Label(terminalio.FONT, text="starting", color=DIM, scale=2, x=10, y=46)
+badge = label.Label(terminalio.FONT, text="starting", color=DIM, scale=2, x=10, y=62)
 home_grp.append(badge)
-dbg = label.Label(terminalio.FONT, text="", color=AMBER, scale=2, x=10, y=70)
+dbg = label.Label(terminalio.FONT, text="", color=AMBER, scale=2, x=10, y=86)
 home_grp.append(dbg)
 pet = label.Label(terminalio.FONT, text=FACES["idle"], color=FG, scale=6,
-                  x=46, y=108, line_spacing=0.95)
+                  x=46, y=122, line_spacing=0.95)
 home_grp.append(pet)
 home_grp.append(Rect(8, 300, W - 16, 2, fill=DIV))
 counts = label.Label(terminalio.FONT, text="", color=FG, scale=2, x=10, y=322)
