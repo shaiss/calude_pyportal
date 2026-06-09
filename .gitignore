@@ -17,3 +17,6 @@ Thumbs.db
 
 # large restore image is kept intentionally; uncomment to exclude from git
 # nina_w102_restore.bin
+
+# Claude Code machine-local settings (the .claude/skills/ dir IS tracked intentionally)
+.claude/settings.local.json
