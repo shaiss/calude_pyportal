@@ -15,6 +15,27 @@ def test_pack_roundtrip_through_a_fake_nvm():
     assert b.velocity[:3] == [12, 8, 30] and b.vel_count == 3
 
 
+def test_settings_defaults_and_toggle():
+    s = S.Stats()
+    assert s.setting(S.S_SOUND) is True      # on by default
+    assert s.setting(S.S_DEMO) is False      # off by default
+    assert s.toggle_setting(S.S_SOUND) is False
+    assert s.setting(S.S_SOUND) is False
+    assert s.toggle_setting(S.S_DEMO) is True
+
+
+def test_settings_persist_through_nvm():
+    nvm = bytearray(S.NVM_SIZE)
+    a = S.Stats()
+    a.toggle_setting(S.S_SOUND)   # -> off
+    a.bright_level = 2
+    a.save(nvm)
+    b = S.Stats.load(nvm)
+    assert b.setting(S.S_SOUND) is False
+    assert b.setting(S.S_HUD) is True
+    assert b.bright_level == 2
+
+
 def test_uninitialized_nvm_loads_defaults():
     s = S.Stats.load(bytearray(256))   # all zero -> bad magic
     assert s.tokens == 0 and s.pet_name == "Buddy" and s.level == 0

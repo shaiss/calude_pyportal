@@ -29,15 +29,32 @@ def test_buttons_fit_on_screen():
     assert SC.DENY_Y + SC.BTN_H <= H
 
 
-def test_tab_hit_thirds():
-    assert SC.tab_hit(40, 10, W) == "home"
-    assert SC.tab_hit(160, 10, W) == "pet"
-    assert SC.tab_hit(290, 10, W) == "info"
+def test_tab_hit_maps_each_zone():
+    n = len(SC.TABS)
+    zone = W // n
+    for i, name in enumerate(SC.TABS):
+        cx = i * zone + zone // 2
+        assert SC.tab_hit(cx, 10, W) == name
 
 
-def test_tab_hit_rightmost_edge_clamps_to_info():
-    assert SC.tab_hit(W - 1, 10, W) == "info"
+def test_tab_hit_rightmost_edge_clamps_to_last():
+    assert SC.tab_hit(W - 1, 10, W) == SC.TABS[-1]
 
 
 def test_tab_hit_below_bar_is_none():
     assert SC.tab_hit(160, SC.TAB_H + 5, W) is None
+
+
+def test_menu_hit_maps_each_row():
+    for i, name in enumerate(SC.MENU_ROWS):
+        cy = SC.MENU_TOP + i * SC.MENU_ROW_H + SC.MENU_ROW_H // 2
+        assert SC.menu_hit(W // 2, cy, W, H) == name
+
+
+def test_menu_hit_above_first_row_is_none():
+    assert SC.menu_hit(W // 2, SC.MENU_TOP - 5, W, H) is None
+
+
+def test_menu_hit_below_last_row_is_none():
+    below = SC.MENU_TOP + len(SC.MENU_ROWS) * SC.MENU_ROW_H + 5
+    assert SC.menu_hit(W // 2, below, W, H) is None

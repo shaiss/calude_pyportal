@@ -12,7 +12,13 @@ _FMT = "<BBIHHIBBB8HBBB24s32s"
 NVM_SIZE = struct.calcsize(_FMT)   # 92
 _MAGIC = ord("B")
 _VERSION = 1
-DEFAULT_SETTINGS = 0b00001111      # sound|led|hud|spare on; refined as settings land
+DEFAULT_SETTINGS = 0b00001111      # sound|led|hud|spare on; demo (0x10) off by default
+
+# settings_bits flags
+S_SOUND = 0x01
+S_LED = 0x02
+S_HUD = 0x04
+S_DEMO = 0x10
 
 
 def energy_tier(energy_at_nap, hours_since_nap):
@@ -113,6 +119,13 @@ class Stats:
 
     def on_denial(self):
         self.denials += 1
+
+    def setting(self, mask):
+        return bool(self.settings_bits & mask)
+
+    def toggle_setting(self, mask):
+        self.settings_bits ^= mask
+        return bool(self.settings_bits & mask)
 
     def on_nap_end(self, secs):
         self.nap_seconds += int(secs)
