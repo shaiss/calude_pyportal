@@ -15,6 +15,7 @@ import adafruit_touchscreen
 import bud_proto
 import bud_screens
 import bud_stats
+import bud_species
 import microcontroller
 
 # ---------- ESP32 (native BLE firmware) in run mode ----------
@@ -180,14 +181,12 @@ def set_bright(level):
         pass
 
 
-def react(face_key, color, dur=1.5, then=None):
-    """Briefly take over the pet's face with an emotion, then it settles back.
-
-    `then` optionally chains a follow-up (face_key, color, dur) for a two-beat pop.
-    """
-    global reacting, react_until, react_then
-    pet.text = FACES.get(face_key, FACES["idle"])
-    pet.color = color
+def react(state_key, color=None, dur=1.5, then=None):
+    """Briefly show an emotion *state* over the base animation; optionally chain `then`
+    as a follow-up (state_key, color, dur). The loop renders the species frames for
+    react_state while a reaction is active; `color` is ignored (state drives color)."""
+    global reacting, react_until, react_then, react_state
+    react_state = state_key
     react_until = time.monotonic() + dur
     reacting = True
     react_then = then
@@ -213,8 +212,8 @@ badge = label.Label(terminalio.FONT, text="starting", color=DIM, scale=2, x=10, 
 home_grp.append(badge)
 dbg = label.Label(terminalio.FONT, text="", color=AMBER, scale=2, x=10, y=86)
 home_grp.append(dbg)
-pet = label.Label(terminalio.FONT, text=FACES["idle"], color=FG, scale=6,
-                  x=46, y=122, line_spacing=0.95)
+pet = label.Label(terminalio.FONT, text=FACES["idle"], color=FG, scale=bud_species.SPECIES_SCALE,
+                  x=16, y=110, line_spacing=0.95)
 home_grp.append(pet)
 home_grp.append(Rect(8, 300, W - 16, 2, fill=DIV))
 counts = label.Label(terminalio.FONT, text="", color=FG, scale=2, x=10, y=322)
@@ -301,6 +300,8 @@ screen = "home"
 last_pet_draw = 0.0
 energy_at_nap = 3
 last_nap_end = boot
+species_idx = stats.species_idx % bud_species.count()
+react_state = "idle"
 last_data = 0.0
 buf = b""
 last_state = ""
@@ -538,33 +539,27 @@ while True:
                         play("jump_sound")
                         set_screen(t)
                         print("[ui] screen -> %s" % t)
+                    elif t is None and screen == "home" and py > bud_screens.TAB_H:
+                        species_idx = (species_idx + 1) % bud_species.count()
+                        stats.species_idx = species_idx
+                        stats.save(microcontroller.nvm)
+                        play("jump_sound")
+                        print("[ui] species -> %s (%d)" % (bud_species.name(species_idx), species_idx))
 
     # pet reactions / blink + screensaver dim after idle
     now = time.monotonic()
+    anim_state = last_state if last_state != "disc" else "sleep"
     if reacting:
         if now >= react_until:
             if react_then is not None:
-                nxt = react_then
-                react(nxt[0], nxt[1], nxt[2])    # chain the next beat
+                react(react_then[0], react_then[1], react_then[2])
+                anim_state = react_state
             else:
-                pet.text = face_for(last_state)
-                pet.color = SCOL.get(last_state, FG)
                 reacting = False
-                next_blink = now + 1.5
-    elif blinking:
-        if now >= blink_until:
-            pet.text = face_for(last_state)
-            blinking = False
-            next_blink = now + 2.6 + (int(now * 10) % 14) * 0.1
-    elif now >= next_blink:
-        f = face_for(last_state)
-        if int(now) % 5 == 0:
-            pet.text = eye_swap(f, "( o.- )")    # occasional wink
-            blink_until = now + 0.22
         else:
-            pet.text = blink_face(f)             # normal blink
-            blink_until = now + 0.14
-        blinking = True
+            anim_state = react_state
+    pet.text = bud_species.frame(species_idx, anim_state, now)
+    pet.color = SCOL.get(anim_state, FG)
     if screen == "pet" and now - last_pet_draw > 0.5:
         draw_pet()
         last_pet_draw = now
