@@ -25,7 +25,7 @@ def approval_hit(px, py, w, h):
 
 # --- top tab bar: HOME | PET | INFO (equal thirds across the top) -------------------
 TAB_H = 45          # 1.5x the original 30px -> bigger, easier touch target
-TABS = ("home", "pet", "info")
+TABS = ("home", "pet", "info", "set")
 
 
 def tab_hit(px, py, w):
@@ -36,3 +36,19 @@ def tab_hit(px, py, w):
     if i >= len(TABS):
         i = len(TABS) - 1
     return TABS[i]
+
+
+# --- SET (settings) screen: tall, tappable rows -------------------------------------
+MENU_TOP = TAB_H + 40
+MENU_ROW_H = 56
+MENU_ROWS = ("sound", "bright", "hud", "led", "demo", "reset")
+
+
+def menu_hit(px, py, w, h):
+    """Map a tap on the SET screen to a settings-row name, else None."""
+    if py < MENU_TOP:
+        return None
+    i = (py - MENU_TOP) // MENU_ROW_H
+    if 0 <= i < len(MENU_ROWS):
+        return MENU_ROWS[i]
+    return None

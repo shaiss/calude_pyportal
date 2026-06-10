@@ -35,3 +35,10 @@ def test_frame_advances_over_time():
 
 def test_species_index_wraps():
     assert S.frame(S.count(), "idle", 0.0) == S.frame(0, "idle", 0.0)
+
+
+def test_particle_idle_empty_and_sleep_cycles_z():
+    assert S.particle("idle", 0.0) == ""
+    seen = set(S.particle("sleep", t * 0.1) for t in range(40))
+    assert len(seen) >= 2
+    assert any("z" in p for p in seen)

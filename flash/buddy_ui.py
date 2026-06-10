@@ -84,12 +84,22 @@ except Exception as e:
 
 
 def play(name):
-    if snd is None:
+    if snd is None or not stats.setting(bud_stats.S_SOUND):
         return
     try:
         getattr(snd, name)()
     except Exception:
         pass
+
+
+# onboard NeoPixel -- pulses red on attention (gated by the LED setting)
+try:
+    import neopixel
+    pixel = neopixel.NeoPixel(board.NEOPIXEL, 1, brightness=0.3, auto_write=True)
+    pixel.fill(0)
+except Exception as e:
+    print("[ui] neopixel init err:", e)
+    pixel = None
 
 
 BG = 0x000000
@@ -196,12 +206,12 @@ def react(state_key, color=None, dur=1.5, then=None):
 root = displayio.Group()
 root.append(Rect(0, 0, W, H, fill=BG))
 
-# top tab bar: HOME | PET | INFO (tap to switch screens); active tab brightened.
-TAB_W = W // 3
+# top tab bar: HOME | PET | INFO | SET (tap to switch screens); active tab brightened.
+TAB_W = W // len(bud_screens.TABS)
 tab_lbls = []
 for _i, _nm in enumerate(bud_screens.TABS):
     _lb = label.Label(terminalio.FONT, text=_nm.upper(), color=DIM, scale=3,
-                      x=_i * TAB_W + 12, y=16)
+                      x=_i * TAB_W + 8, y=16)
     tab_lbls.append(_lb)
     root.append(_lb)
 root.append(Rect(0, bud_screens.TAB_H, W, 1, fill=DIV))
@@ -215,6 +225,8 @@ home_grp.append(dbg)
 pet = label.Label(terminalio.FONT, text=FACES["idle"], color=FG, scale=bud_species.SPECIES_SCALE,
                   x=16, y=110, line_spacing=0.95)
 home_grp.append(pet)
+parts = label.Label(terminalio.FONT, text="", color=DIM, scale=3, x=250, y=98)
+home_grp.append(parts)
 home_grp.append(Rect(8, 300, W - 16, 2, fill=DIV))
 counts = label.Label(terminalio.FONT, text="", color=FG, scale=2, x=10, y=322)
 home_grp.append(counts)
@@ -245,19 +257,25 @@ root.append(pet_grp)
 
 # ---- INFO: what it is + hardware (static for now) ----
 info_grp = displayio.Group()
-_iy = bud_screens.TAB_H + 14
-_info_lines = [
-    ("I watch your Claude", DIM), ("desktop sessions and", DIM),
-    ("surface approvals here.", DIM), ("", DIM),
-    ("tap a prompt's", FG), ("APPROVE / DENY.", FG), ("", DIM),
-    ("PyPortal Titano", DIM), ("SAMD51 + ESP32 BLE", DIM), ("", DIM),
-    ("github.com/shaiss", DIM), ("/calude_pyportal", DIM),
-]
-for _j, (_t, _c) in enumerate(_info_lines):
-    info_grp.append(label.Label(terminalio.FONT, text=_t, color=_c, scale=2,
-                                x=10, y=_iy + _j * 22))
+# one multi-line label (not 12) -- far fewer displayio objects = less RAM/fragmentation
+info_grp.append(label.Label(
+    terminalio.FONT, scale=2, color=DIM, x=10, y=bud_screens.TAB_H + 20, line_spacing=1.3,
+    text=("I watch your Claude\ndesktop sessions and\nsurface approvals.\n\n"
+          "tap a prompt's\nAPPROVE / DENY.\n\n"
+          "PyPortal Titano\nSAMD51 + ESP32 BLE\n\ngithub.com/shaiss\n/calude_pyportal")))
 info_grp.hidden = True
 root.append(info_grp)
+
+# ---- SET: settings rows (tap a row to toggle/cycle); texts set by draw_set() ----
+set_grp = displayio.Group()
+set_rows = []
+for _i, _nm in enumerate(bud_screens.MENU_ROWS):
+    _r = label.Label(terminalio.FONT, text=_nm, color=FG, scale=3, x=14,
+                     y=bud_screens.MENU_TOP + _i * bud_screens.MENU_ROW_H + 14)
+    set_rows.append(_r)
+    set_grp.append(_r)
+set_grp.hidden = True
+root.append(set_grp)
 
 # approval overlay: full-screen, so the base pet/HUD is covered -- the cat shrinks to a
 # small chip and the screen is dominated by big APPROVE / DENY buttons (bud_screens geometry).
@@ -296,12 +314,23 @@ print("[stats] loaded: lvl=%d tok=%d appr=%d deny=%d name=%s owner=%s (nvm=%dB, 
       % (stats.level, stats.tokens, stats.approvals, stats.denials,
          stats.pet_name, stats.owner_name or "-",
          len(microcontroller.nvm), bud_stats.NVM_SIZE))
+set_bright(stats.bright_level / 4.0)
+if not stats.setting(bud_stats.S_HUD):
+    msg.hidden = True
+    toks.hidden = True
 screen = "home"
 last_pet_draw = 0.0
 energy_at_nap = 3
 last_nap_end = boot
 species_idx = stats.species_idx % bud_species.count()
 react_state = "idle"
+reset_armed = False
+reset_t = 0.0
+_demo_step = -1
+_DEMO = ((2, 0, 8, "yarn build", 120000, 30000),
+         (0, 1, 3, "approve: Bash", 45000, 12000),
+         (0, 0, 1, "thinking...", 80000, 20000),
+         (3, 0, 9, "running tests", 200000, 51000))
 last_data = 0.0
 buf = b""
 last_state = ""
@@ -383,16 +412,28 @@ def draw_pet():
     pet_today.text = "today    %s" % fmtk(tama.tokens_today)
 
 
+def draw_set():
+    set_rows[0].text = "sound  " + ("on" if stats.setting(bud_stats.S_SOUND) else "off")
+    set_rows[1].text = "bright %d/4" % stats.bright_level
+    set_rows[2].text = "hud    " + ("on" if stats.setting(bud_stats.S_HUD) else "off")
+    set_rows[3].text = "led    " + ("on" if stats.setting(bud_stats.S_LED) else "off")
+    set_rows[4].text = "demo   " + ("on" if stats.setting(bud_stats.S_DEMO) else "off")
+    set_rows[5].text = "reset  " + ("again?" if reset_armed else "x2")
+
+
 def set_screen(name):
     global screen
     screen = name
     home_grp.hidden = name != "home"
     pet_grp.hidden = name != "pet"
     info_grp.hidden = name != "info"
+    set_grp.hidden = name != "set"
     for _i, _nm in enumerate(bud_screens.TABS):
         tab_lbls[_i].color = FG if _nm == name else DIM
     if name == "pet":
         draw_pet()
+    elif name == "set":
+        draw_set()
 
 
 set_screen("home")
@@ -462,7 +503,7 @@ while True:
                 if tama.waiting > 0 or tama.running > 0 or tama.prompt_id:
                     last_lively = time.monotonic()
                     if dimmed:
-                        set_bright(1.0)
+                        set_bright(stats.bright_level / 4.0)
                         dimmed = False
                 cs = "run %d  wait %d  tot %d" % (tama.running, tama.waiting, tama.total)
                 if cs != last_counts:
@@ -505,7 +546,7 @@ while True:
                 play("haptic_tap")
                 last_lively = nowt
                 if dimmed:
-                    set_bright(1.0)
+                    set_bright(stats.bright_level / 4.0)
                     dimmed = False
                 if last_appr and prompt_id and (nowt - last_touch_act) > 1.2:
                     hit = bud_screens.approval_hit(px, py, W, H)
@@ -545,6 +586,38 @@ while True:
                         stats.save(microcontroller.nvm)
                         play("jump_sound")
                         print("[ui] species -> %s (%d)" % (bud_species.name(species_idx), species_idx))
+                    elif t is None and screen == "set":
+                        row = bud_screens.menu_hit(px, py, W, H)
+                        if row == "bright":
+                            stats.bright_level = stats.bright_level % 4 + 1
+                            set_bright(stats.bright_level / 4.0)
+                        elif row == "hud":
+                            _on = stats.toggle_setting(bud_stats.S_HUD)
+                            msg.hidden = not _on
+                            toks.hidden = not _on
+                        elif row == "sound":
+                            stats.toggle_setting(bud_stats.S_SOUND)
+                        elif row == "led":
+                            stats.toggle_setting(bud_stats.S_LED)
+                        elif row == "demo":
+                            stats.toggle_setting(bud_stats.S_DEMO)
+                        elif row == "reset":
+                            if reset_armed and (nowt - reset_t) < 4:
+                                bud_stats.Stats().save(microcontroller.nvm)
+                                stats = bud_stats.Stats.load(microcontroller.nvm)
+                                species_idx = 0
+                                reset_armed = False
+                                react("dizzy", AMBER, 1.2)
+                                print("[ui] factory reset")
+                            else:
+                                reset_armed = True
+                                reset_t = nowt
+                        if row:
+                            if row != "reset":
+                                reset_armed = False
+                                stats.save(microcontroller.nvm)
+                            play("beep")
+                            draw_set()
 
     # pet reactions / blink + screensaver dim after idle
     now = time.monotonic()
@@ -560,6 +633,14 @@ while True:
             anim_state = react_state
     pet.text = bud_species.frame(species_idx, anim_state, now)
     pet.color = SCOL.get(anim_state, FG)
+    parts.text = bud_species.particle(anim_state, now)
+    parts.color = SCOL.get(anim_state, DIM)
+    if pixel is not None:
+        if stats.setting(bud_stats.S_LED) and last_state == "attention":
+            _ph = (now * 1.5) % 2.0
+            pixel.fill((int(30 + (_ph if _ph < 1.0 else 2.0 - _ph) * 210), 0, 0))
+        else:
+            pixel.fill(0)
     if screen == "pet" and now - last_pet_draw > 0.5:
         draw_pet()
         last_pet_draw = now
@@ -571,7 +652,23 @@ while True:
         dot.x = -20
         dot.y = -20
 
-    # link liveness
-    if time.monotonic() - last_data > 8:
-        set_state("disc")
+    # link liveness: fresh data drives states above; stale -> demo (if on) or disconnected
+    if (time.monotonic() - last_data) > 8:
+        if stats.setting(bud_stats.S_DEMO):
+            _step = int((now - boot) / 5) % len(_DEMO)
+            if _step != _demo_step:
+                _demo_step = _step
+                _sc = _DEMO[_step]
+                tama.running, tama.waiting, tama.total = _sc[0], _sc[1], _sc[2]
+                tama.msg, tama.tokens, tama.tokens_today = _sc[3], _sc[4], _sc[5]
+                set_state("attention" if tama.waiting else ("busy" if tama.running else "idle"))
+                counts.text = "run %d  wait %d  tot %d" % (tama.running, tama.waiting, tama.total)
+                last_counts = counts.text
+                if not msg.hidden:
+                    msg.text = wrap2(tama.msg, 26)
+                if not toks.hidden:
+                    toks.text = "tok %s  today %s" % (fmtk(tama.tokens), fmtk(tama.tokens_today))
+            last_lively = now
+        else:
+            set_state("disc")
     time.sleep(0.01)
