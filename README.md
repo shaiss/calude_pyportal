@@ -1,10 +1,18 @@
 # PyPortal-Claude-Buddy
 
 A desk-pet companion for the **Claude Desktop "Hardware Buddy"**, running on an
-**Adafruit PyPortal Titano**. A little ASCII cat watches your Claude session over
-Bluetooth LE and reacts in real time: it shows running / queued task counts, the
-latest activity message, token usage, and surfaces tool-permission prompts that you
-**approve or deny by tapping the screen** — with sound + speaker "haptic" feedback.
+**Adafruit PyPortal Titano** — a port of `anthropics/claude-desktop-buddy` (M5StickC) to
+the Titano's touchscreen. **18 faithful animated ASCII pets** watch your Claude session
+over Bluetooth LE and react across a touch-navigated UI: live run/queued counts, activity,
+and token usage; a Tamagotchi-style stats layer (level / mood / energy / fed, persisted to
+`nvm`); and tool-permission prompts you **approve or deny with big touch buttons** — plus a
+settings menu, demo mode, NeoPixel, and sound + speaker "haptic" feedback.
+
+**Feature parity** with the M5StickC reference: 7 persona states (sleep/idle/busy/attention/
+celebrate/dizzy/heart), 18 lazy-loaded species (tap the pet to cycle) with particle overlays,
+HOME / PET / INFO / SET screens behind a tab bar, gamification + persistence, demo mode, and
+owner/pet-name personalization. (Not ported: GIF custom-character packs; and the IMU-only
+shake→dizzy / face-down→nap — the Titano has no IMU.)
 
 ```
       /\_/\          * busy
@@ -72,22 +80,26 @@ SAMD51 ── CircuitPython · buddy_ui.py  (→ D:\code.py) ──────�
 
 ## Repository layout
 ```
-flash/                 # what runs on the device
-  buddy_ui.py          #   THE app  → deploy as D:\code.py  (pet UI + protocol + touch + audio)
-  buddy_audio.py       #   audio/haptic → deploy as D:\buddy_audio.py  (from the NEAR Pulse AudioManager)
-  boot.py              #   enables usb_cdc.data (COM8) — ONLY needed when reflashing the ESP32
-  buddy.py             #   minimal display-less responder (fallback / protocol bring-up)
-  run_bridge.py        #   SAMD51 = transparent UART↔COM8 bridge (BLE round-trip testing)
-  passthrough.py       #   SAMD51 = drop ESP32 into ROM bootloader + bridge (for flashing)
-  chunkflash.ps1       #   flash firmware.bin in 16 KB chunks through the passthrough
-esp32fw/               # native ESP32 BLE firmware (PlatformIO · Arduino/Bluedroid)
+flash/                 # what runs on the device (deploy.ps1 copies buddy_audio + every bud_*.py + buddy_ui→code.py)
+  buddy_ui.py          #   THE app → D:\code.py  (orchestrates; display/touch/loop)
+  bud_proto.py         #   wire protocol: status ack, heartbeat→state, permission send, owner/name
+  bud_stats.py         #   gamification + microcontroller.nvm persistence + settings bit-flags
+  bud_screens.py       #   screen geometry + hit-tests (approval/tab/menu) + particle overlays
+  bud_species.py       #   lazy species loader (one resident at a time)
+  bud_species_<name>.py#   per-species pose DATA (cat, dragon, owl, robot, … 18 total)
+  buddy_audio.py       #   audio/haptic (from the NEAR Pulse AudioManager)
+  boot.py / buddy.py / run_bridge.py / passthrough.py / chunkflash.ps1   # flashing & bring-up utilities (NOT runtime)
+esp32fw/               # native ESP32 BLE firmware (PlatformIO · Arduino/Bluedroid) — the radio
   src/main.cpp         #   NUS GATT server + UART0 bridge
   platformio.ini       #   env:nina  (board=esp32dev, huge_app partitions)
+tests/                 # host pytest over the import-pure modules (no hardware needed)
+  test_proto / test_stats / test_screens / test_species .py
 tools/                 # host-side helpers (PowerShell + Python)
-  deploy.ps1           #   copy buddy_ui.py→D:\code.py (+ buddy_audio.py); auto-reload picks it up
+  deploy.ps1           #   copy runtime modules to D: (buddy_ui→code.py last); auto-reload applies
   cam.py               #   grab one webcam frame → cam.jpg (visual verification)
-  winrt_gatt.py        #   raw WinRT GATT discovery test (the Windows acid test)
-  scan_ble.py / round_trip.py / status_test.py / probe_connect.py  # BLE bring-up tests
+  drive.py             #   act as a synthetic Claude desktop over BLE (drive heartbeats/prompts)
+  serial_log.py        #   log the SAMD51 console (COM7): boot prints, [stats], tracebacks
+  winrt_gatt.py / scan_ble.py / round_trip.py / status_test.py / probe_connect.py  # BLE bring-up tests
 nina_w102_restore.bin  # nina-fw 3.3.0 image — flash at 0x0 to restore WiFi
 PROGRESS.md            # build log / status / recovery notes
 ```
