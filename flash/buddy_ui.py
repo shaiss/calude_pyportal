@@ -3,6 +3,7 @@
 # AND renders the pet + status on the Titano's HX8357, ported from the M5StickC original.
 # v1 = display + state-driven pet + status HUD + approval panel (touch approve/deny is v2).
 import time
+import gc
 import json
 import board
 import busio
@@ -29,7 +30,7 @@ time.sleep(0.1)
 reset.value = True
 time.sleep(0.6)
 uart = busio.UART(board.ESP_TX, board.ESP_RX, baudrate=115200,
-                  timeout=0, receiver_buffer_size=8192)
+                  timeout=0, receiver_buffer_size=2048)   # 8192 was a fragmentation hog at boot
 
 # ---------- Display: portrait 320x480 ----------
 display = board.DISPLAY
@@ -235,6 +236,7 @@ home_grp.append(msg)
 toks = label.Label(terminalio.FONT, text="", color=DIM, scale=2, x=10, y=462)
 home_grp.append(toks)
 root.append(home_grp)
+gc.collect()
 
 # ---- PET: gamification stats (the photo screen); texts set by draw_pet() ----
 pet_grp = displayio.Group()
@@ -254,6 +256,7 @@ for _l in (pet_title, pet_mood, pet_fed, pet_energy, pet_lv,
     pet_grp.append(_l)
 pet_grp.hidden = True
 root.append(pet_grp)
+gc.collect()
 
 # ---- INFO: what it is + hardware (static for now) ----
 info_grp = displayio.Group()
@@ -265,6 +268,7 @@ info_grp.append(label.Label(
           "PyPortal Titano\nSAMD51 + ESP32 BLE\n\ngithub.com/shaiss\n/calude_pyportal")))
 info_grp.hidden = True
 root.append(info_grp)
+gc.collect()
 
 # ---- SET: settings rows (tap a row to toggle/cycle); texts set by draw_set() ----
 set_grp = displayio.Group()
@@ -276,6 +280,7 @@ for _i, _nm in enumerate(bud_screens.MENU_ROWS):
     set_grp.append(_r)
 set_grp.hidden = True
 root.append(set_grp)
+gc.collect()
 
 # approval overlay: full-screen, so the base pet/HUD is covered -- the cat shrinks to a
 # small chip and the screen is dominated by big APPROVE / DENY buttons (bud_screens geometry).
@@ -299,6 +304,7 @@ appr.append(label.Label(terminalio.FONT, text="DENY", color=RED, scale=4,
                         x=W // 2 - 48, y=bud_screens.DENY_Y + 28))
 appr.hidden = True
 root.append(appr)
+gc.collect()
 
 # touch marker (drawn on top); parked off-screen until a touch lands
 dot = Rect(-20, -20, 12, 12, fill=PINK)
@@ -456,7 +462,8 @@ display.root_group = _splash
 play("startup_chime")
 time.sleep(1.8)
 display.root_group = root
-print("[ui] buddy UI ready; waiting for Claude")
+gc.collect()
+print("[ui] buddy UI ready; free=%d" % gc.mem_free())
 
 while True:
     n = uart.in_waiting

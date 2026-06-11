@@ -4,9 +4,10 @@ A desk-pet companion for Claude Desktop's "Hardware Buddy", on an **Adafruit PyP
 Titano**. It watches Claude sessions over BLE and lets you **approve/deny tool prompts by
 touch**. This is a port of `anthropics/claude-desktop-buddy` (originally M5StickC).
 
-> Active work: bringing this port to feature parity with the reference. See the spec at
-> `docs/superpowers/specs/2026-06-08-pyportal-titano-parity-design.md` and the plan in
-> `docs/superpowers/plans/`.
+> Status: **feature parity achieved** (PRs #1–3 merged to `main`) — 7 states, 18 lazy-loaded
+> animated species + particles, gamification + `nvm` persistence, HOME/PET/INFO/SET screens
+> behind a touch tab bar, menu/settings, demo mode, owner/splash. GIF custom-character packs
+> are **out of scope** ("not doing"). Spec/plan archived in `docs/superpowers/`.
 
 ## Architecture — two chips
 
@@ -29,11 +30,15 @@ UI + wire protocol). The custom ESP32 firmware is what makes Windows BLE discove
 
 ## Code layout
 
-- `flash/` — what runs on the device. `buddy_ui.py` → deploy as `D:\code.py` (the app);
-  `buddy_audio.py` (reused audio). Migrating from one monolith into focused modules
-  (`bud_proto / bud_stats / bud_pets / bud_species / bud_screens / bud_menu / bud_ui`) per the spec.
+- `flash/` — what runs on the device. `buddy_ui.py` → deploy as `D:\code.py` (orchestrator);
+  logic lives in import-pure, host-tested modules: `bud_proto` (wire protocol), `bud_stats`
+  (gamification + nvm + settings), `bud_screens` (geometry / hit-tests / particles),
+  `bud_species` (lazy loader) + `bud_species_<name>.py` (18 per-species pose DATA);
+  `buddy_audio` (reused audio).
 - `esp32fw/` — native ESP32 BLE firmware (PlatformIO/Arduino, NUS GATT + UART bridge). Stable.
-- `tools/` — host helpers: `deploy.ps1`, `cam.py` (webcam capture), BLE bring-up tests.
+- `tests/` — host pytest over the pure modules (no hardware).
+- `tools/` — host helpers: `deploy.ps1`, `cam.py` (webcam), `drive.py` (synthetic-desktop BLE
+  driver), `serial_log.py` (COM7 console), BLE bring-up tests.
 - `.claude/skills/device-eyes/` — the webcam verification skill (see below).
 - `nina_w102_restore.bin` — stock WiFi firmware to undo the BLE flash.
 
@@ -41,9 +46,12 @@ UI + wire protocol). The custom ESP32 firmware is what makes Windows BLE discove
 
 - **PyPortal Titano**: SAMD51J20 + ESP32 (NINA-W102), 320×480 HX8357, resistive touch, speaker,
   NeoPixel, microSD slot. **No IMU. No RTC.** CircuitPython 10.x (`CIRCUITPY` = `D:`).
-- **Persist via `microcontroller.nvm`** (~256B) — the CircuitPython filesystem is read-only to
-  the device while USB is mounted, so you can't write files at runtime. (microSD is the path
-  for larger data like GIF packs.)
+- **Persist via `microcontroller.nvm`** (8192 B here; packed record is 92 B) — the CircuitPython
+  filesystem is read-only to the device while USB is mounted, so you can't write files at runtime.
+- **RAM / fragmentation (the recurring trap):** ~200KB free at steady state, but the boot build
+  can fail a *small* alloc via heap fragmentation if too many displayio objects accrue. Keep
+  labels few (consolidate multi-line text), lazy-load species (one resident at a time), keep the
+  UART buffer small, and `gc.collect()` between screen builds. Boot prints `free=` — watch it.
 - **No IMU** → the reference's shake→dizzy / face-down→nap / landscape-clock don't port;
   re-trigger those via touch/timers (nap ≈ screensaver idle).
 - `time.monotonic()` does NOT reset on soft reload — seed timers from a captured `boot`.
@@ -53,13 +61,16 @@ UI + wire protocol). The custom ESP32 firmware is what makes Windows BLE discove
 ## Common commands
 
 ```powershell
-tools/deploy.ps1                 # copy flash/buddy_ui.py→D:\code.py (+ buddy_audio.py); auto-reload applies
-python tools/cam.py              # webcam-capture the screen → ./cam.jpg  (then Read it)
-cd esp32fw ; pio run             # build the ESP32 BLE firmware
+tools/deploy.ps1                     # copy buddy_audio + every bud_*.py + buddy_ui.py→D:\code.py
+python tools/cam.py                  # webcam-capture the screen → ./cam.jpg  (then Read it)
+python tools/drive.py busy           # synthetic Claude desktop over BLE (busy/attention/level --ramp)
+python tools/serial_log.py COM7 10   # log the device console (boot prints, [stats], tracebacks)
+python -m pytest tests/ -q           # host tests over the pure modules (no hardware)
+cd esp32fw ; pio run                 # build the ESP32 BLE firmware
 ```
-Device libs needed in `D:\lib/` (Adafruit CP 10.x bundle): `adafruit_display_text`,
-`adafruit_display_shapes`, `adafruit_touchscreen`, `simpleio` (`adafruit_hx8357` is built into
-the board).
+Serial soft-reboot for testing: send Ctrl-C then Ctrl-D to COM7. Device libs in `D:\lib/`
+(Adafruit CP 10.x bundle): `adafruit_display_text`, `adafruit_display_shapes`,
+`adafruit_touchscreen`, `neopixel`, `simpleio` (`adafruit_hx8357` is built into the board).
 
 ## Verifying changes — look at the device
 
@@ -81,7 +92,7 @@ not a crash.
 
 ## Reference
 
-The upstream behavior we target: `anthropics/claude-desktop-buddy` — 7 states
+The upstream behavior targeted: `anthropics/claude-desktop-buddy` — 7 states
 (sleep/idle/busy/attention/celebrate/dizzy/heart), 18 ASCII species, gamification (level/fed/
-mood/energy), touch menu/settings, PET/INFO screens, GIF pets. Wire protocol in its
-`REFERENCE.md`.
+mood/energy), touch menu/settings, PET/INFO screens — **all ported**. GIF custom-character
+packs are intentionally NOT ported (out of scope). Wire protocol in its `REFERENCE.md`.
