@@ -15,15 +15,19 @@
 #define NUS_RX_UUID "6E400002-B5A3-F393-E0A9-E50E24DCCA9E"  // write  (central -> device)
 #define NUS_TX_UUID "6E400003-B5A3-F393-E0A9-E50E24DCCA9E"  // notify (device -> central)
 
+// Safety-net interval: if not connected, re-assert advertising every 30 s to recover from
+// any silent advertising stop (e.g. glitchy resets while a central was connected).
+#define READVERT_INTERVAL_MS 30000UL
+
 static BLECharacteristic *txChar = nullptr;
-static volatile bool connected = false;
+// Standard Espressif two-flag pattern: callbacks only flip deviceConnected; loop() acts on it.
+static volatile bool deviceConnected    = false;
+static bool          oldDeviceConnected = false;
+static unsigned long lastAdvMs          = 0;
 
 class ServerCallbacks : public BLEServerCallbacks {
-  void onConnect(BLEServer *s) override { connected = true; }
-  void onDisconnect(BLEServer *s) override {
-    connected = false;
-    BLEDevice::startAdvertising();
-  }
+  void onConnect(BLEServer *) override    { deviceConnected = true;  }
+  void onDisconnect(BLEServer *) override { deviceConnected = false; }
 };
 
 class RxCallbacks : public BLECharacteristicCallbacks {
@@ -59,11 +63,32 @@ void setup() {
   adv->setMinPreferred(0x06);
   adv->setMinPreferred(0x12);
   BLEDevice::startAdvertising();
+  lastAdvMs = millis();
 }
 
 void loop() {
+  // --- connection-state machine (Espressif canonical pattern) ---
+  if (!deviceConnected && oldDeviceConnected) {
+    // Just disconnected: let the BLE stack settle before restarting advertising.
+    delay(500);
+    BLEDevice::startAdvertising();
+    lastAdvMs = millis();
+    oldDeviceConnected = deviceConnected;
+  }
+  if (deviceConnected && !oldDeviceConnected) {
+    // Just connected.
+    oldDeviceConnected = deviceConnected;
+  }
+
+  // Safety net: if idle (not connected) and advertising may have silently stopped,
+  // re-assert it every READVERT_INTERVAL_MS so we never need a manual power-cycle.
+  if (!deviceConnected && (millis() - lastAdvMs >= READVERT_INTERVAL_MS)) {
+    BLEDevice::startAdvertising();
+    lastAdvMs = millis();
+  }
+
   // SAMD51 -> BLE: forward any UART0 bytes out as NUS TX notifications.
-  if (connected && txChar) {
+  if (deviceConnected && txChar) {
     int avail = Serial.available();
     if (avail > 0) {
       uint8_t buf[180];
